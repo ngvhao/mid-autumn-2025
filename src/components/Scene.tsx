@@ -23,7 +23,7 @@ export default function Scene() {
   return (
     <>
       <ambientLight intensity={0.15} />
-      <StarsField density={5000} />
+      <StarsField density={10000} />
       <ShootingStars count={32} area={{ width: 14, height: 8, depth: 6 }} speed={[7, 12]} color="#fff" spawnInterval={0.5} />
       <group>
         <ParticleHeart count={1200} />
