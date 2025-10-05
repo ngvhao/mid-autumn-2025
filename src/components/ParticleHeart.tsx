@@ -41,6 +41,16 @@ function generateHeartPoints(num: number): Float32Array {
     const x = rimX * r + jitterX;
     const y = rimY * r + jitterY;
 
+    // Thin density at the lobe intersection (upper center) to avoid overcrowding
+    // If near vertical centerline and upper half, probabilistically reject some points
+    if (y > 0 && Math.abs(x) < 0.15) {
+      const rejectProb = THREE.MathUtils.clamp(0.6 * (0.15 - Math.abs(x)) / 0.15, 0, 0.6); // up to 60%
+      if (Math.random() < rejectProb) {
+        i--; // retry this index with a new random sample
+        continue;
+      }
+    }
+
     // Volumetric puff: thicker near the center, thinner near the rim on both front/back
     // Dome profile: bulge(r) = bulgeMax * (1 - r^alpha)
     const alpha = 0.9;
@@ -177,8 +187,8 @@ export default function ParticleHeart({ count = 4000, showLines = true }: Partic
   // Build line segments index for near neighbors
   const { linePositions, lineColors } = useMemo(() => {
     const pos = positions;
-    const maxConnections = 4;
-    const maxDistance = 0.25;
+    const maxConnections = 6; // slightly higher to avoid gaps
+    const maxDistance = 0.28; // slightly larger radius
     const segments: number[] = [];
     const colors: number[] = [];
     const tmpA = new THREE.Vector3();
@@ -202,6 +212,54 @@ export default function ParticleHeart({ count = 4000, showLines = true }: Partic
         const ib = j * 3;
         segments.push(pos[ia], pos[ia + 1], pos[ia + 2], pos[ib], pos[ib + 1], pos[ib + 2]);
         // pastel soft white-pink
+        const c = new THREE.Color().setHSL(0.95, 0.5, 0.9);
+        colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+      }
+    }
+
+    // Extra pass: ensure rim continuity by connecting rim neighbors in 2D projection
+    // 1) compute 2D radii
+    const radii2d: { i: number; r: number }[] = [];
+    for (let i = 0; i < count; i++) {
+      const ia = i * 3;
+      const x = pos[ia];
+      const y = pos[ia + 1];
+      radii2d.push({ i, r: Math.hypot(x, y) });
+    }
+    // 2) threshold at ~80th percentile to get tighter outer rim
+    const sorted = [...radii2d].sort((a, b) => a.r - b.r);
+    const threshIdx = Math.floor(sorted.length * 0.8);
+    const rimThreshold = sorted[threshIdx]?.r ?? 0;
+    const rimIndices = radii2d.filter((e) => e.r >= rimThreshold).map((e) => e.i);
+
+    // 3) for each rim point, ensure min connections to other rim points within rimMaxDistance (2D)
+    const rimMinConnections = 10;
+    const rimMaxDistance = 0.24; // shorter links hugging the boundary
+    const tmp2 = new THREE.Vector2();
+    const tmp2b = new THREE.Vector2();
+    for (let idx = 0; idx < rimIndices.length; idx++) {
+      const i = rimIndices[idx];
+      const ia = i * 3;
+      tmp2.set(pos[ia], pos[ia + 1]);
+      const candidates: { j: number; d: number }[] = [];
+      for (let jdx = 0; jdx < rimIndices.length; jdx++) {
+        const j = rimIndices[jdx];
+        if (i === j) continue;
+        const jb = j * 3;
+        tmp2b.set(pos[jb], pos[jb + 1]);
+        const d = tmp2.distanceTo(tmp2b);
+        // Locally reduce connections near lobe intersection (upper center)
+        const nearIntersection = tmp2.y > 0 && Math.abs(tmp2.x) < 0.18 && Math.abs(tmp2b.x) < 0.18;
+        const localMax = nearIntersection ? rimMaxDistance * 0.8 : rimMaxDistance;
+        if (d < localMax) candidates.push({ j, d });
+      }
+      candidates.sort((a, b) => a.d - b.d);
+      const localMin = tmp2.y > 0 && Math.abs(tmp2.x) < 0.18 ? Math.max(3, Math.floor(rimMinConnections * 0.6)) : rimMinConnections;
+      const need = Math.min(localMin, candidates.length);
+      for (let k = 0; k < need; k++) {
+        const j = candidates[k].j;
+        const jb = j * 3;
+        segments.push(pos[ia], pos[ia + 1], pos[ia + 2], pos[jb], pos[jb + 1], pos[jb + 2]);
         const c = new THREE.Color().setHSL(0.95, 0.5, 0.9);
         colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
       }
