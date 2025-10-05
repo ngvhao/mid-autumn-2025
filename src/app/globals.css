@@ -24,3 +24,12 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Fullscreen canvas layout */
+html, body, :root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
