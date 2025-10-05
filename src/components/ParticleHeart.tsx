@@ -155,12 +155,24 @@ function createTextTexture(text: string): THREE.Texture {
 }
 
 export default function ParticleHeart({ count = 4000, showLines = true }: ParticleHeartProps) {
-  const pointsRef = useRef<THREE.Points>(null);
+  const pointsRefA = useRef<THREE.Points>(null);
+  const pointsRefB = useRef<THREE.Points>(null);
   const linesRef = useRef<THREE.LineSegments>(null);
-  const pointsMatRef = useRef<THREE.PointsMaterial>(null);
+  const pointsMatRefA = useRef<THREE.PointsMaterial>(null);
+  const pointsMatRefB = useRef<THREE.PointsMaterial>(null);
 
   const positions = useMemo(() => generateHeartPoints(count), [count]);
   const basePositions = useMemo(() => positions.slice(0), [positions]);
+
+  // Split particles into two groups (even/odd indices)
+  const { indicesA, indicesB } = useMemo(() => {
+    const a: number[] = [];
+    const b: number[] = [];
+    for (let i = 0; i < count; i++) (i % 2 === 0 ? a : b).push(i);
+    return { indicesA: a, indicesB: b };
+  }, [count]);
+  const positionsA = useMemo(() => new Float32Array(indicesA.length * 3), [indicesA]);
+  const positionsB = useMemo(() => new Float32Array(indicesB.length * 3), [indicesB]);
 
   // Build line segments index for near neighbors
   const { linePositions, lineColors } = useMemo(() => {
@@ -204,58 +216,103 @@ export default function ParticleHeart({ count = 4000, showLines = true }: Partic
     const t = clock.getElapsedTime();
     // Heartbeat scale
     const scale = 1 + Math.sin(t * 2.2) * 0.06;
-    if (pointsRef.current) pointsRef.current.scale.setScalar(scale);
+    if (pointsRefA.current) pointsRefA.current.scale.setScalar(scale);
+    if (pointsRefB.current) pointsRefB.current.scale.setScalar(scale);
     if (linesRef.current) linesRef.current.scale.setScalar(scale);
 
     // Global twinkle: subtle opacity flutter
-    if (pointsMatRef.current) {
-      const baseOpacity = 0.9;
-      const amp = 0.05;
-      const twinkle = baseOpacity + Math.sin(t * 3.1 + twinklePhase) * amp;
-      pointsMatRef.current.opacity = THREE.MathUtils.clamp(twinkle, 0.6, 1);
-    }
+    const baseOpacity = 0.9;
+    const amp = 0.05;
+    const twinkle = THREE.MathUtils.clamp(baseOpacity + Math.sin(t * 3.1 + twinklePhase) * amp, 0.6, 1);
+    if (pointsMatRefA.current) pointsMatRefA.current.opacity = twinkle;
+    if (pointsMatRefB.current) pointsMatRefB.current.opacity = twinkle;
 
     // Gentle particle oscillation
-    const pos = positions;
     for (let i = 0; i < count; i++) {
       const idx = i * 3;
       const bx = basePositions[idx];
       const by = basePositions[idx + 1];
       const bz = basePositions[idx + 2];
-      pos[idx] = bx + Math.sin(t + i * 0.13) * 0.02;
-      pos[idx + 1] = by + Math.cos(t * 1.1 + i * 0.21) * 0.02;
-      pos[idx + 2] = bz + Math.sin(t * 0.9 + i * 0.17) * 0.02;
+      positions[idx] = bx + Math.sin(t + i * 0.13) * 0.02;
+      positions[idx + 1] = by + Math.cos(t * 1.1 + i * 0.21) * 0.02;
+      positions[idx + 2] = bz + Math.sin(t * 0.9 + i * 0.17) * 0.02;
     }
-    (pointsRef.current?.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    // Update split arrays from full positions
+    for (let k = 0; k < indicesA.length; k++) {
+      const i = indicesA[k];
+      const si = k * 3;
+      const di = i * 3;
+      positionsA[si] = positions[di];
+      positionsA[si + 1] = positions[di + 1];
+      positionsA[si + 2] = positions[di + 2];
+    }
+    for (let k = 0; k < indicesB.length; k++) {
+      const i = indicesB[k];
+      const si = k * 3;
+      const di = i * 3;
+      positionsB[si] = positions[di];
+      positionsB[si + 1] = positions[di + 1];
+      positionsB[si + 2] = positions[di + 2];
+    }
+    (pointsRefA.current?.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (pointsRefB.current?.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
   });
 
   const twinklePhase = useMemo(() => Math.random() * Math.PI * 2, []);
-  const textTexture = useMemo(() => {
+  const textTextureA = useMemo(() => {
     if (typeof window === "undefined") return null;
     return createTextTexture("Chúc Thư Trung Thu Vui Vẻ");
+  }, []);
+  const textTextureB = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return createTextTexture("Wishing Thư a happy Mid-Autumn holiday");
   }, []);
 
   return (
     <group>
-      <points ref={pointsRef}>
+      <points ref={pointsRefA}>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
-            args={[positions, 3]}
-            count={positions.length / 3}
-            array={positions}
+            args={[positionsA, 3]}
+            count={positionsA.length / 3}
+            array={positionsA}
             itemSize={3}
           />
         </bufferGeometry>
         <pointsMaterial
-          ref={pointsMatRef}
+          ref={pointsMatRefA}
           color={"#ffffff"}
           size={0.055}
           sizeAttenuation
           transparent
           opacity={0.9}
           blending={THREE.AdditiveBlending}
-          map={textTexture ?? undefined}
+          map={textTextureA ?? undefined}
+          alphaTest={0.02}
+          depthTest
+          depthWrite={false}
+        />
+      </points>
+      <points ref={pointsRefB}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[positionsB, 3]}
+            count={positionsB.length / 3}
+            array={positionsB}
+            itemSize={3}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          ref={pointsMatRefB}
+          color={"#ffffff"}
+          size={0.055}
+          sizeAttenuation
+          transparent
+          opacity={0.9}
+          blending={THREE.AdditiveBlending}
+          map={textTextureB ?? undefined}
           alphaTest={0.02}
           depthTest
           depthWrite={false}
